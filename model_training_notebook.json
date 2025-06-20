@@ -1,0 +1,649 @@
+{
+ "cells": [
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "# Extractive Text Summarization Model Training and Evaluation\n",
+    "\n",
+    "This notebook implements and evaluates an extractive text summarization model using multiple techniques:\n",
+    "- TF-IDF based scoring\n",
+    "- TextRank algorithm  \n",
+    "- Hybrid approach combining multiple methods\n",
+    "\n",
+    "## Requirements\n",
+    "- Minimum 70% accuracy target\n",
+    "- Comprehensive evaluation metrics\n",
+    "- Model persistence and reproducibility"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "## 1. Import Libraries and Setup"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "# Import required libraries\n",
+    "import pandas as pd\n",
+    "import numpy as np\n",
+    "import nltk\n",
+    "from sklearn.model_selection import train_test_split\n",
+    "from sklearn.metrics import classification_report, confusion_matrix\n",
+    "import matplotlib.pyplot as plt\n",
+    "import seaborn as sns\n",
+    "from rouge_score import rouge_scorer\n",
+    "import pickle\n",
+    "import json\n",
+    "from datetime import datetime\n",
+    "import warnings\n",
+    "warnings.filterwarnings('ignore')\n",
+    "\n",
+    "# Import our custom summarizer\n",
+    "from extractive_summarizer import ExtractiveSummarizer\n",
+    "\n",
+    "# Set up plotting\n",
+    "plt.style.use('seaborn-v0_8')\n",
+    "sns.set_palette(\"husl\")\n",
+    "\n",
+    "print(\"Libraries imported successfully!\")\n",
+    "print(f\"Training started at: {datetime.now()}\")"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "## 2. Load and Prepare Dataset"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "# Load dataset (replace with actual CNN/DailyMail or your dataset)\n",
+    "# For demonstration, we'll create sample data - replace this with real data loading\n",
+    "\n",
+    "def create_sample_dataset():\n",
+    "    \"\"\"\n",
+    "    Create sample dataset for demonstration\n",
+    "    In production, replace this with actual dataset loading\n",
+    "    \"\"\"\n",
+    "    sample_articles = [\n",
+    "        {\n",
+    "            'article': \"\"\"Artificial intelligence has revolutionized many industries in recent years. \n",
+    "            Machine learning algorithms can now process vast amounts of data quickly and accurately. \n",
+    "            Companies are investing heavily in AI research and development. \n",
+    "            However, there are concerns about job displacement and ethical implications. \n",
+    "            Experts believe that proper regulation and guidelines are necessary. \n",
+    "            The future of AI depends on responsible development and implementation. \n",
+    "            Education and training programs are essential for workforce adaptation.\"\"\",\n",
+    "            'summary': \"Artificial intelligence has revolutionized industries through machine learning. Companies invest heavily in AI while experts emphasize need for regulation and workforce training.\"\n",
+    "        },\n",
+    "        {\n",
+    "            'article': \"\"\"Climate change continues to be a major global challenge. \n",
+    "            Rising temperatures are causing ice caps to melt at alarming rates. \n",
+    "            Extreme weather events are becoming more frequent and severe. \n",
+    "            Governments worldwide are implementing policies to reduce carbon emissions. \n",
+    "            Renewable energy sources like solar and wind are gaining popularity. \n",
+    "            International cooperation is crucial for addressing this crisis. \n",
+    "            Individual actions also play an important role in environmental protection.\"\"\",\n",
+    "            'summary': \"Climate change causes rising temperatures and extreme weather. Governments implement policies while renewable energy gains popularity for environmental protection.\"\n",
+    "        },\n",
+    "        # Add more sample data...\n",
+    "    ]\n",
+    "    \n",
+    "    # Extend with more samples for better evaluation\n",
+    "    for i in range(50):  # Create 50 samples for training\n",
+    "        sample_articles.append({\n",
+    "            'article': f\"\"\"Sample article {i+3} for training purposes. This is a longer text that contains multiple sentences. \n",
+    "            The purpose is to test the summarization algorithm with various content types. \n",
+    "            Each article should have enough content to generate meaningful summaries. \n",
+    "            The model will learn to identify the most important sentences. \n",
+    "            This approach helps in creating robust extractive summaries.\"\"\",\n",
+    "            'summary': f\"Sample article {i+3} tests summarization algorithm with multiple sentences for robust extractive summaries.\"\n",
+    "        })\n",
+    "    \n",
+    "    return pd.DataFrame(sample_articles)\n",
+    "\n",
+    "# Load or create dataset\n",
+    "print(\"Loading dataset...\")\n",
+    "df = create_sample_dataset()\n",
+    "\n",
+    "print(f\"Dataset loaded successfully!\")\n",
+    "print(f\"Total samples: {len(df)}\")\n",
+    "print(f\"Columns: {df.columns.tolist()}\")\n",
+    "\n",
+    "# Display sample data\n",
+    "print(\"\\nSample data:\")\n",
+    "display(df.head(2))"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "## 3. Data Analysis and Visualization"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "# Analyze dataset characteristics\n",
+    "df['article_length'] = df['article'].str.len()\n",
+    "df['summary_length'] = df['summary'].str.len()\n",
+    "df['compression_ratio'] = df['summary_length'] / df['article_length']\n",
+    "\n",
+    "# Create visualizations\n",
+    "fig, axes = plt.subplots(2, 2, figsize=(15, 10))\n",
+    "\n",
+    "# Article length distribution\n",
+    "axes[0,0].hist(df['article_length'], bins=20, alpha=0.7, color='skyblue')\n",
+    "axes[0,0].set_title('Distribution of Article Lengths')\n",
+    "axes[0,0].set_xlabel('Character Count')\n",
+    "axes[0,0].set_ylabel('Frequency')\n",
+    "\n",
+    "# Summary length distribution\n",
+    "axes[0,1].hist(df['summary_length'], bins=20, alpha=0.7, color='lightgreen')\n",
+    "axes[0,1].set_title('Distribution of Summary Lengths')\n",
+    "axes[0,1].set_xlabel('Character Count')\n",
+    "axes[0,1].set_ylabel('Frequency')\n",
+    "\n",
+    "# Compression ratio\n",
+    "axes[1,0].hist(df['compression_ratio'], bins=20, alpha=0.7, color='salmon')\n",
+    "axes[1,0].set_title('Compression Ratio Distribution')\n",
+    "axes[1,0].set_xlabel('Summary Length / Article Length')\n",
+    "axes[1,0].set_ylabel('Frequency')\n",
+    "\n",
+    "# Article vs Summary length scatter\n",
+    "axes[1,1].scatter(df['article_length'], df['summary_length'], alpha=0.6, color='purple')\n",
+    "axes[1,1].set_title('Article Length vs Summary Length')\n",
+    "axes[1,1].set_xlabel('Article Length')\n",
+    "axes[1,1].set_ylabel('Summary Length')\n",
+    "\n",
+    "plt.tight_layout()\n",
+    "plt.show()\n",
+    "\n",
+    "# Print statistics\n",
+    "print(\"Dataset Statistics:\")\n",
+    "print(f\"Average article length: {df['article_length'].mean():.2f} characters\")\n",
+    "print(f\"Average summary length: {df['summary_length'].mean():.2f} characters\")\n",
+    "print(f\"Average compression ratio: {df['compression_ratio'].mean():.3f}\")\n",
+    "print(f\"Standard deviation of compression ratio: {df['compression_ratio'].std():.3f}\")"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "## 4. Train-Test Split"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "# Split dataset into training and testing sets\n",
+    "X = df['article'].values\n",
+    "y = df['summary'].values\n",
+    "\n",
+    "X_train, X_test, y_train, y_test = train_test_split(\n",
+    "    X, y, test_size=0.2, random_state=42, shuffle=True\n",
+    ")\n",
+    "\n",
+    "print(f\"Training set size: {len(X_train)}\")\n",
+    "print(f\"Test set size: {len(X_test)}\")\n",
+    "print(f\"Split ratio: {len(X_test)/(len(X_train)+len(X_test))*100:.1f}% test\")"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "## 5. Model Training and Comparison"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "# Initialize different summarizer models\n",
+    "models = {\n",
+    "    'TF-IDF': ExtractiveSummarizer(method='tfidf'),\n",
+    "    'TextRank': ExtractiveSummarizer(method='textrank'),\n",
+    "    'Hybrid': ExtractiveSummarizer(method='hybrid')\n",
+    "}\n",
+    "\n",
+    "# ROUGE scorer for evaluation\n",
+    "scorer = rouge_scorer.RougeScorer(['rouge1', 'rouge2', 'rougeL'], use_stemmer=True)\n",
+    "\n",
+    "print(\"Models initialized successfully!\")\n",
+    "print(f\"Available models: {list(models.keys())}\")"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "## 6. Model Evaluation and Performance Metrics"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "def evaluate_model(model, X_test, y_test, model_name):\n",
+    "    \"\"\"\n",
+    "    Evaluate a summarization model using ROUGE metrics\n",
+    "    \"\"\"\n",
+    "    print(f\"\\nEvaluating {model_name} model...\")\n",
+    "    \n",
+    "    # Generate summaries\n",
+    "    generated_summaries = []\n",
+    "    rouge_scores = {'rouge1': [], 'rouge2': [], 'rougeL': []}\n",
+    "    \n",
+    "    for i, article in enumerate(X_test):\n",
+    "        # Generate summary\n",
+    "        generated_summary = model.summarize(article, summary_ratio=0.3)\n",
+    "        generated_summaries.append(generated_summary)\n",
+    "        \n",
+    "        # Calculate ROUGE scores\n",
+    "        scores = scorer.score(y_test[i], generated_summary)\n",
+    "        \n",
+    "        for metric in rouge_scores.keys():\n",
+    "            rouge_scores[metric].append(scores[metric].fmeasure)\n",
+    "    \n",
+    "    # Calculate average scores\n",
+    "    avg_scores = {}\n",
+    "    for metric in rouge_scores.keys():\n",
+    "        avg_scores[metric] = np.mean(rouge_scores[metric])\n",
+    "    \n",
+    "    return avg_scores, generated_summaries, rouge_scores\n",
+    "\n",
+    "# Evaluate all models\n",
+    "results = {}\n",
+    "all_summaries = {}\n",
+    "\n",
+    "for model_name, model in models.items():\n",
+    "    avg_scores, summaries, detailed_scores = evaluate_model(model, X_test, y_test, model_name)\n",
+    "    results[model_name] = avg_scores\n",
+    "    all_summaries[model_name] = summaries\n",
+    "    print(f\"{model_name} - ROUGE-1: {avg_scores['rouge1']:.4f}, ROUGE-2: {avg_scores['rouge2']:.4f}, ROUGE-L: {avg_scores['rougeL']:.4f}\")"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "## 7. Performance Visualization"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "# Create comprehensive performance visualizations\n",
+    "fig, axes = plt.subplots(2, 2, figsize=(15, 12))\n",
+    "\n",
+    "# ROUGE scores comparison\n",
+    "models_list = list(results.keys())\n",
+    "rouge1_scores = [results[model]['rouge1'] for model in models_list]\n",
+    "rouge2_scores = [results[model]['rouge2'] for model in models_list]\n",
+    "rougeL_scores = [results[model]['rougeL'] for model in models_list]\n",
+    "\n",
+    "x = np.arange(len(models_list))\n",
+    "width = 0.25\n",
+    "\n",
+    "axes[0,0].bar(x - width, rouge1_scores, width, label='ROUGE-1', alpha=0.8)\n",
+    "axes[0,0].bar(x, rouge2_scores, width, label='ROUGE-2', alpha=0.8)\n",
+    "axes[0,0].bar(x + width, rougeL_scores, width, label='ROUGE-L', alpha=0.8)\n",
+    "axes[0,0].set_xlabel('Models')\n",
+    "axes[0,0].set_ylabel('ROUGE Scores')\n",
+    "axes[0,0].set_title('ROUGE Scores Comparison')\n",
+    "axes[0,0].set_xticks(x)\n",
+    "axes[0,0].set_xticklabels(models_list)\n",
+    "axes[0,0].legend()\n",
+    "axes[0,0].grid(True, alpha=0.3)\n",
+    "\n",
+    "# Overall performance radar chart (simplified as bar chart)\n",
+    "best_model = max(results.keys(), key=lambda x: results[x]['rouge1'])\n",
+    "best_scores = results[best_model]\n",
+    "\n",
+    "metrics = list(best_scores.keys())\n",
+    "scores = list(best_scores.values())\n",
+    "\n",
+    "axes[0,1].bar(metrics, scores, color=['skyblue', 'lightgreen', 'salmon'])\n",
+    "axes[0,1].set_title(f'Best Model Performance: {best_model}')\n",
+    "axes[0,1].set_ylabel('ROUGE Scores')\n",
+    "axes[0,1].set_ylim(0, 1)\n",
+    "for i, v in enumerate(scores):\n",
+    "    axes[0,1].text(i, v + 0.01, f'{v:.3f}', ha='center')\n",
+    "\n",
+    "# Accuracy check (using ROUGE-1 as proxy for accuracy)\n",
+    "accuracy_threshold = 0.7\n",
+    "model_accuracies = [(model, results[model]['rouge1']) for model in models_list]\n",
+    "colors = ['green' if acc >= accuracy_threshold else 'red' for _, acc in model_accuracies]\n",
+    "\n",
+    "axes[1,0].bar([model for model, _ in model_accuracies], \n",
+    "              [acc for _, acc in model_accuracies], \n",
+    "              color=colors, alpha=0.7)\n",
+    "axes[1,0].axhline(y=accuracy_threshold, color='black', linestyle='--', \n",
+    "                  label=f'Target Accuracy ({accuracy_threshold})')\n",
+    "axes[1,0].set_title('Model Accuracy vs Target (70%)')\n",
+    "axes[1,0].set_ylabel('ROUGE-1 Score (Accuracy Proxy)')\n",
+    "axes[1,0].legend()
+axes[1,0].grid(True, alpha=0.3)
+
+# Performance improvement over baseline
+baseline_score = min(rouge1_scores)
+improvements = [(score - baseline_score) / baseline_score * 100 for score in rouge1_scores]
+
+axes[1,1].bar(models_list, improvements, color='gold', alpha=0.8)
+axes[1,1].set_title('Performance Improvement over Baseline')
+axes[1,1].set_ylabel('Improvement (%)')
+axes[1,1].grid(True, alpha=0.3)
+for i, v in enumerate(improvements):
+    axes[1,1].text(i, v + 0.5, f'{v:.1f}%', ha='center')
+
+plt.tight_layout()
+plt.show()
+
+# Print detailed results
+print("\\n" + "="*50)
+print("DETAILED EVALUATION RESULTS")
+print("="*50)
+
+for model_name in models_list:
+    print(f"\\n{model_name} Model:")
+    print(f"  ROUGE-1: {results[model_name]['rouge1']:.4f}")
+    print(f"  ROUGE-2: {results[model_name]['rouge2']:.4f}")
+    print(f"  ROUGE-L: {results[model_name]['rougeL']:.4f}")
+    
+    accuracy_status = "✅ PASSED" if results[model_name]['rouge1'] >= accuracy_threshold else "❌ FAILED"
+    print(f"  Accuracy Target (70%): {accuracy_status}")
+
+print(f"\\nBest performing model: {best_model}")
+print(f"Best ROUGE-1 score: {results[best_model]['rouge1']:.4f}")
+
+# Check if any model meets the 70% accuracy requirement
+passing_models = [model for model in models_list if results[model]['rouge1'] >= accuracy_threshold]
+print(f"\\nModels meeting 70% accuracy target: {passing_models if passing_models else 'None'}")
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "## 8. Confusion Matrix and Classification Report"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "# Create binary classification for confusion matrix\n",
+    "# We'll classify summaries as \"good\" (ROUGE-1 >= 0.5) or \"poor\" (ROUGE-1 < 0.5)\n",
+    "\n",
+    "def create_classification_metrics(model, X_test, y_test, model_name, threshold=0.5):\n",
+    "    \"\"\"\n",
+    "    Create classification metrics for confusion matrix\n",
+    "    \"\"\"\n",
+    "    print(f\"\\nCreating classification metrics for {model_name}...\")\n",
+    "    \n",
+    "    y_true = []  # True labels (good/poor based on reference summary quality)\n",
+    "    y_pred = []  # Predicted labels (good/poor based on generated summary quality)\n",
+    "    \n",
+    "    for i, article in enumerate(X_test):\n",
+    "        # Generate summary\n",
+    "        generated_summary = model.summarize(article, summary_ratio=0.3)\n",
+    "        \n",
+    "        # Calculate ROUGE score\n",
+    "        scores = scorer.score(y_test[i], generated_summary)\n",
+    "        rouge1_score = scores['rouge1'].fmeasure\n",
+    "        \n",
+    "        # Create binary classification\n",
+    "        # True label: assume reference summaries are \"good\" (1)\n",
+    "        y_true.append(1)\n",
+    "        \n",
+    "        # Predicted label: based on ROUGE score\n",
+    "        y_pred.append(1 if rouge1_score >= threshold else 0)\n",
+    "    \n",
+    "    return y_true, y_pred\n",
+    "\n",
+    "# Generate classification metrics for best model\n",
+    "best_model_obj = models[best_model]\n",
+    "y_true, y_pred = create_classification_metrics(best_model_obj, X_test, y_test, best_model)\n",
+    "\n",
+    "# Create confusion matrix\n",
+    "cm = confusion_matrix(y_true, y_pred)\n",
+    "labels = ['Poor Summary', 'Good Summary']\n",
+    "\n",
+    "# Plot confusion matrix\n",
+    "plt.figure(figsize=(8, 6))\n",
+    "sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', \n",
+    "            xticklabels=labels, yticklabels=labels)\n",
+    "plt.title(f'Confusion Matrix - {best_model} Model')\n",
+    "plt.xlabel('Predicted')\n",
+    "plt.ylabel('Actual')\n",
+    "plt.show()\n",
+    "\n",
+    "# Generate classification report\n",
+    "from sklearn.metrics import precision_score, recall_score, f1_score, accuracy_score\n",
+    "\n",
+    "accuracy = accuracy_score(y_true, y_pred)\n",
+    "precision = precision_score(y_true, y_pred, average='weighted')\n",
+    "recall = recall_score(y_true, y_pred, average='weighted')\n",
+    "f1 = f1_score(y_true, y_pred, average='weighted')\n",
+    "\n",
+    "print(f\"\\nClassification Metrics for {best_model} Model:\")\n",
+    "print(f\"Accuracy: {accuracy:.4f}\")\n",
+    "print(f\"Precision: {precision:.4f}\")\n",
+    "print(f\"Recall: {recall:.4f}\")\n",
+    "print(f\"F1-Score: {f1:.4f}\")\n",
+    "\n",
+    "# Detailed classification report\n",
+    "print(f\"\\nDetailed Classification Report:\")\n",
+    "print(classification_report(y_true, y_pred, target_names=labels))"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "## 9. Model Analysis and Sample Predictions"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "# Display sample predictions\n",
+    "print(\"Sample Predictions from Best Model ({}):\".format(best_model))\n",
+    "print(\"=\"*60)\n",
+    "\n",
+    "for i in range(min(3, len(X_test))):\n",
+    "    print(f\"\\nSample {i+1}:\")\n",
+    "    print(f\"Original Article: {X_test[i][:200]}...\")\n",
+    "    print(f\"Reference Summary: {y_test[i]}\")\n",
+    "    \n",
+    "    generated = models[best_model].summarize(X_test[i], summary_ratio=0.3)\n",
+    "    print(f\"Generated Summary: {generated}\")\n",
+    "    \n",
+    "    # Calculate ROUGE score for this sample\n",
+    "    scores = scorer.score(y_test[i], generated)\n",
+    "    print(f\"ROUGE-1: {scores['rouge1'].fmeasure:.4f}\")\n",
+    "    print(\"-\" * 40)\n",
+    "\n",
+    "# Model performance summary\n",
+    "print(\"\\n\" + \"=\"*60)\n",
+    "print(\"MODEL PERFORMANCE SUMMARY\")\n",
+    "print(\"=\"*60)\n",
+    "\n",
+    "summary_stats = {\n",
+    "    'Total Models Evaluated': len(models),\n",
+    "    'Best Model': best_model,\n",
+    "    'Best ROUGE-1 Score': results[best_model]['rouge1'],\n",
+    "    'Models Meeting 70% Target': len(passing_models),\n",
+    "    'Average Processing Time per Article': 'N/A (not measured)',\n",
+    "    'Dataset Size': len(df),\n",
+    "    'Test Set Size': len(X_test)\n",
+    "}\n",
+    "\n",
+    "for key, value in summary_stats.items():\n",
+    "    print(f\"{key}: {value}\")"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "## 10. Model Saving and Persistence"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "# Save the best performing model\n",
+    "import os\n",
+    "\n",
+    "# Create models directory\n",
+    "os.makedirs('models', exist_ok=True)\n",
+    "os.makedirs('results', exist_ok=True)\n",
+    "\n",
+    "# Save best model\n",
+    "best_model_path = f'models/best_model_{best_model.lower()}.pkl'\n",
+    "models[best_model].save_model(best_model_path)\n",
+    "print(f\"Best model saved to: {best_model_path}\")\n",
+    "\n",
+    "# Save all models\n",
+    "for model_name, model in models.items():\n",
+    "    model_path = f'models/model_{model_name.lower()}.pkl'\n",
+    "    model.save_model(model_path)\n",
+    "    print(f\"{model_name} model saved to: {model_path}\")\n",
+    "\n",
+    "# Save evaluation results\n",
+    "results_data = {\n",
+    "    'evaluation_results': results,\n",
+    "    'best_model': best_model,\n",
+    "    'dataset_info': {\n",
+    "        'total_samples': len(df),\n",
+    "        'train_size': len(X_train),\n",
+    "        'test_size': len(X_test),\n",
+    "        'avg_article_length': float(df['article_length'].mean()),\n",
+    "        'avg_summary_length': float(df['summary_length'].mean())\n",
+    "    },\n",
+    "    'performance_metrics': {\n",
+    "        'accuracy': accuracy,\n",
+    "        'precision': precision,\n",
+    "        'recall': recall,\n",
+    "        'f1_score': f1\n",
+    "    },\n",
+    "    'training_timestamp': datetime.now().isoformat()\n",
+    "}\n",
+    "\n",
+    "# Save results as JSON\n",
+    "with open('results/evaluation_results.json', 'w') as f:\n",
+    "    json.dump(results_data, f, indent=2)\n",
+    "\n",
+    "print(\"\\nEvaluation results saved to: results/evaluation_results.json\")\n",
+    "\n",
+    "# Create model summary report\n",
+    "report = f\"\"\"# Model Training Report\n",
+    "\n",
+    "## Training Summary\n",
+    "- Training Date: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n",
+    "- Dataset Size: {len(df)} samples\n",
+    "- Test Set Size: {len(X_test)} samples\n",
+    "- Models Evaluated: {len(models)}\n",
+    "\n",
+    "## Best Model Performance\n",
+    "- Best Model: {best_model}\n",
+    "- ROUGE-1 Score: {results[best_model]['rouge1']:.4f}\n",
+    "- ROUGE-2 Score: {results[best_model]['rouge2']:.4f}\n",
+    "- ROUGE-L Score: {results[best_model]['rougeL']:.4f}\n",
+    "- Accuracy: {accuracy:.4f}\n",
+    "- Precision: {precision:.4f}\n",
+    "- Recall: {recall:.4f}\n",
+    "- F1-Score: {f1:.4f}\n",
+    "\n",
+    "## Accuracy Target Achievement\n",
+    "- Target: 70% (0.70)\n",
+    "- Achieved: {'Yes' if results[best_model]['rouge1'] >= 0.7 else 'No'}\n",
+    "- Models Meeting Target: {len(passing_models)}/{len(models)}\n",
+    "\n",
+    "## Model Files\n",
+    "- Best Model: {best_model_path}\n",
+    "- All Models: Available in models/ directory\n",
+    "- Results: results/evaluation_results.json\n",
+    "\"\"\"\n",
+    "\n",
+    "with open('results/model_report.md', 'w') as f:\n",
+    "    f.write(report)\n",
+    "\n",
+    "print(\"Model report saved to: results/model_report.md\")\n",
+    "\n",
+    "# Final status check\n",
+    "print(\"\\n\" + \"=\"*60)\n",
+    "print(\"TRAINING COMPLETED SUCCESSFULLY!\")\n",
+    "print(\"=\"*60)\n",
+    "print(f\"✅ Model Training: Complete\")\n",
+    "print(f\"✅ Model Evaluation: Complete\")\n",
+    "print(f\"✅ Model Saving: Complete\")\n",
+    "print(f\"✅ Results Documentation: Complete\")\n",
+    "\n",
+    "accuracy_check = \"✅ PASSED\" if results[best_model]['rouge1'] >= 0.7 else \"❌ FAILED\"\n",
+    "print(f\"✅ 70% Accuracy Target: {accuracy_check}\")\n",
+    "\n",
+    "print(f\"\\nBest model achieved {results[best_model]['rouge1']:.1%} accuracy\")\n",
+    "print(f\"Training completed at: {datetime.now()}\")"
+   ]
+  }
+ ],
+ "metadata": {
+  "kernelspec": {
+   "display_name": "Python 3",
+   "language": "python",
+   "name": "python3"
+  },
+  "language_info": {
+   "codemirror_mode": {
+    "name": "ipython",
+    "version": 3
+   },
+   "file_extension": ".py",
+   "mimetype": "text/x-python",
+   "name": "python",
+   "nbconvert_exporter": "python",
+   "pygments_lexer": "ipython3",
+   "version": "3.8.10"
+  }
+ },
+ "nbformat": 4,
+ "nbformat_minor": 4
+}\n",

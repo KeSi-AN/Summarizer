@@ -2,10 +2,8 @@
 # 📄 Internship Project Report
 
 **Title:** Extractive Text Summarization Using Machine Learning  
-**Intern Name:** [Your Name]  
-**Organization:** [Your Organization / College / Mentor’s Name]  
-**Internship Duration:** [Start Date – End Date]  
-**Submission Date:** [Date]
+**Intern Name:** Adham Ansari  
+
 
 ---
 
